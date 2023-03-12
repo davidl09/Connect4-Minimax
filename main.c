@@ -1,11 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <conio.h>
-#include <math.h>
 #include "colours.h"
 
 #define BOARD_WIDTH 7
 #define BOARD_HEIGHT 6
+
 #define AI 2
 #define HUMAN 1
 #define EMPTY 0
@@ -13,10 +14,17 @@
 #define YELLOW 6
 #define BLUE 1
 #define WHITE 15
-#define GREEN 2
 #define RED 4
 
+long long evaluate_window(short window[4], short player);
+
+struct minimax_return{
+    short column;
+    long long score;
+};
+
 void print_board(short** board){
+    printf("\n");
     for (int i = 0; i < BOARD_WIDTH; ++i) {
         printf("%d  ", i+1);
     }
@@ -37,11 +45,11 @@ void print_board(short** board){
         }
         printf("\n");
     }
-    colourChange(WHITE);
+    colourChange(CYAN);
 }
 
 short is_legal_move(short** board, short column){
-    if(board[0][column] == 0)
+    if(board[0][column] == 0 && (7 > column && column >= 0))
         return 1;
     else return 0;
 }
@@ -114,21 +122,24 @@ short** reset_board(short** board){
 
 }
 
-void handle_win(short** board) {
+short handle_win(short** board) {
     short state = iswin(board);
     if (state == 2) {
         printf("\nThe computer has won. Resetting board...\n");
-        reset_board(board);
     } else if (state == 1) {
         printf("\nYou won! Resetting board...\n");
-        reset_board(board);
     } else if(state == 3){
         printf("\nIt's a draw. Resetting board...\n");
-        reset_board(board);
     }
+    if(state>0){
+        reset_board(board);
+        sleep(3);
+        return 1;
+    }
+    return 0;
 }
 
-int evaluate_window(short window[4], short player) {
+long long evaluate_window(short window[4], short player) {
     short opponent = 3 - player;
     short player_count = 0;
     short opponent_count = 0;
@@ -140,25 +151,26 @@ int evaluate_window(short window[4], short player) {
         }
     }
     if (player_count == 4)
-        return 1e10;
+        return  10000000000;
     if (opponent_count == 4)
-        return -(1e10);
-    if (opponent_count == 0) {
-        return player_count * 1000;
-    }
+        return  -(10000000000);
+    if (opponent_count == 0)
+        return player_count * player_count * 100;
+    if (player_count == 0)
+        return -(opponent_count * opponent_count * 100);
     return player_count - opponent_count;
 }
-int evaluate_board(short** board, short player){
-    int score = 0;
+long long evaluate_board(short** board, short player){
+    long long score = 0;
     short window[4];
-    int window_score;
+    long long window_score;
     for (int i = 0; i < BOARD_HEIGHT; ++i) { //check rows
         for (int j = 0; j < BOARD_WIDTH - 3; ++j) {
             for (int k = 0; k < 4; ++k) {
                 window[k] = board[i][j + k];
             }
-            window_score = evaluate_window(&window, player);
-            if(abs(window_score) > 9e9)
+            window_score = evaluate_window(window, player);
+            if(llabs(window_score) >= 10000000000)
                 return window_score;
             score += window_score;
         }
@@ -168,8 +180,8 @@ int evaluate_board(short** board, short player){
             for (int k = 0; k < 4; ++k) {
                 window[k] = board[i+k][j];
             }
-            window_score = evaluate_window(&window, player);
-            if(abs(window_score) > 9e9)
+            window_score = evaluate_window(window, player);
+            if(llabs(window_score) >= 10000000000)
                 return window_score;
             score += window_score;
         }
@@ -179,19 +191,19 @@ int evaluate_board(short** board, short player){
             for (int k = 0; k < 4; ++k) {
                 window[k] = board[i+k][j+k];
             }
-            window_score = evaluate_window(&window, player);
-            if(abs(window_score) > 9e9)
+            window_score = evaluate_window(window, player);
+            if(llabs(window_score) >= 10000000000)
                 return window_score;
             score += window_score;
         }
     }
     for (int i = 3; i < BOARD_HEIGHT; ++i) { //check downward diagonals
-        for (int j = 0; j < BOARD_WIDTH; ++j) {
+        for (int j = 0; j < BOARD_WIDTH - 3; ++j) {
             for (int k = 0; k < 4; ++k) {
-                window[k] = board[i+k][j-k];
+                window[k] = board[i-k][j+k];
             }
-            window_score = evaluate_window(&window, player);
-            if(abs(window_score) > 9e9)
+            window_score = evaluate_window(window, player);
+            if(llabs(window_score) >= 10000000000)
                 return window_score;
             score += window_score;
         }
@@ -199,11 +211,77 @@ int evaluate_board(short** board, short player){
     return score;
 }
 
-int get_board_score(short** board, short player){
-    return evaluate_board(board, player) - evaluate_board(board, 3 - player);
+short** copy_board(short** board){
+    //returns pointer to a copy of values in board array
+    short** new_board = malloc(sizeof(short*) * BOARD_HEIGHT); //allocate memory for board copy
+    for (int i = 0; i < BOARD_HEIGHT; ++i) {
+        new_board[i] = malloc(sizeof(short) * BOARD_WIDTH);
+        memcpy(new_board[i], board[i], BOARD_WIDTH*sizeof(board[i][0]));
+    }
+    return new_board;
 }
 
-short minimax(short** board, short depth, int alpha, int beta, short ai_turn){
+void free_board(short** board){
+    for (int i = 0; i < BOARD_HEIGHT; ++i) {
+        free(board[i]);
+    }
+    free(board);
+}
+
+struct minimax_return minimax(short** board, short depth, long long alpha, long long beta, short player){
+    struct minimax_return best_move;
+    best_move.column = -1;
+    best_move.score = player == AI ? -10000000000 : 10000000000;
+    short win_state = iswin(board);
+
+    //stopping conditions
+    if(win_state == 2){
+        best_move.score =  10000000000;
+        free_board(board);
+        return best_move;
+    }
+    if(win_state == 1){
+        best_move.score =  -10000000000;
+        free_board(board);
+        return best_move;
+    }
+    if(win_state == 3){
+        best_move.score = 0;
+        free_board(board);
+        return best_move;
+    }
+    if(depth == 0){
+        best_move.column = -1;
+        best_move.score = evaluate_board(board, AI);
+        free_board(board);
+        return best_move;
+    }
+
+    long long score;
+    for (short i = 0; i < BOARD_WIDTH; ++i) {
+        if(is_legal_move(board, i) != 0){
+            score = minimax(place_chip(copy_board(board), i, player), depth - 1, alpha, beta, 3 - player).score;
+            if(player == AI){ //maximising
+                if(score > best_move.score){
+                    best_move.score = score;
+                    best_move.column = i;
+                }
+                alpha = max(alpha, best_move.score);
+                if(alpha >= beta)
+                    break;
+            }else{
+                if(score < best_move.score){
+                    best_move.score = score;
+                    best_move.column = i;
+                }
+                beta = min(beta, best_move.score);
+                if(alpha >= beta)
+                    break;
+            }
+        }
+    }
+    free_board(board);
+    return best_move;
 
 }
 
@@ -213,38 +291,40 @@ int main() {
     for (int i = 0; i < BOARD_HEIGHT; ++i) {
         board[i] = malloc(BOARD_WIDTH*sizeof(short));
         for (int j = 0; j < BOARD_WIDTH; ++j) {
-            board[i][j] = 0;
+            board[i][j] = EMPTY;
         }
     }
-    short turn = HUMAN;
+    short ai_move;
     short move;
-    srand(NULL);
+    print_board(board);
+
     while(1){
-        if(turn == HUMAN){ //human plays
+        printf("\nEnter the index of the column in which you would like to play, in a range of 1-7\n");
+        scanf("%hd", &move);
+        move--;
+        if(is_legal_move(board, move) == 1){ //if move is legal and chip was successfully placed
+            place_chip(board, move, HUMAN);
+            system("cls");
             print_board(board);
-            printf("\n\nEnter the index of the column in which you would like to play, in a range of 1-7\n");
-            scanf("%hd", &move);
-            move--;
-            if(move >= 0 && move <= 6 && place_chip(board, move, HUMAN) != 0){
-                printf("\n%d\n", evaluate_board(board, HUMAN));
-                handle_win(board);
-                turn = AI;
-            }
-            else{
-                printf("That was not a valid move, please try again.\n");
+            if(iswin(board) > 0){
+                if(handle_win(board) > 0)
+                    NULL;
                 continue;
             }
+        }else{
+            printf("That was not a valid move, please try again.\n");
+            continue;
         }
-        if(turn == AI){
-            move = rand()%7;
-            printf("%hd\n", move);
-            if(board[0][move] == 0) {
-                place_chip(board, move, AI);
-                handle_win(board);
-                turn = HUMAN;
+
+        ai_move = minimax(copy_board(board), 9, -10000000000, 10000000000, AI).column;
+        if(is_legal_move(board, ai_move)){
+            place_chip(board, ai_move, AI);
+            system("cls");
+            print_board(board);
+            if(iswin(board) > 0){
+                if(handle_win(board) > 0){}
             }
-
-
         }
     }
+    free_board(board);
 }
